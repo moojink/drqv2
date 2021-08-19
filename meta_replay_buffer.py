@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 import datetime
 import io
+import os
 import random
 import traceback
 from collections import defaultdict
@@ -38,21 +39,21 @@ class ReplayBufferStorage:
     def __init__(self, data_specs, replay_dir):
         self._data_specs = data_specs
         self._replay_dir = replay_dir
-        replay_dir.mkdir(exist_ok=True)
+        if not os.path.exists(replay_dir):
+            os.makedirs(replay_dir)
         self._current_episode = defaultdict(list)
         self._preload()
 
     def __len__(self):
         return self._num_transitions
 
-    def add(self, time_step):
-        for spec in self._data_specs:
-            value = time_step[spec.name]
-            if np.isscalar(value):
-                value = np.full(spec.shape, value, spec.dtype)
-            assert spec.shape == value.shape and spec.dtype == value.dtype
-            self._current_episode[spec.name].append(value)
-        if time_step.last():
+    def add(self, img_obs, proprio_obs, action, reward, discount, done):
+        self._current_episode['img_obs'].append(img_obs)
+        self._current_episode['proprio_obs'].append(proprio_obs)
+        self._current_episode['action'].append(action)
+        self._current_episode['reward'].append(np.full((1,), reward, np.float32)) # need shape (1,) to prevent broadcasting issue
+        self._current_episode['discount'].append(np.full((1,), discount, np.float32)) # need shape (1,) to prevent broadcasting issue
+        if done:
             episode = dict()
             for spec in self._data_specs:
                 value = self._current_episode[spec.name]
@@ -148,16 +149,18 @@ class ReplayBuffer(IterableDataset):
         episode = self._sample_episode()
         # add +1 for the first dummy transition
         idx = np.random.randint(0, episode_len(episode) - self._nstep + 1) + 1
-        obs = episode['observation'][idx - 1]
+        img_obs = episode['img_obs'][idx - 1]
+        proprio_obs = episode['proprio_obs'][idx - 1]
         action = episode['action'][idx]
-        next_obs = episode['observation'][idx + self._nstep - 1]
+        next_img_obs = episode['img_obs'][idx + self._nstep - 1]
+        next_proprio_obs = episode['proprio_obs'][idx + self._nstep - 1]
         reward = np.zeros_like(episode['reward'][idx])
         discount = np.ones_like(episode['discount'][idx])
         for i in range(self._nstep):
             step_reward = episode['reward'][idx + i]
             reward += discount * step_reward
-            discount *= episode['discount'][idx + i] * self._discount
-        return (obs, action, reward, discount, next_obs)
+            discount *= episode['discount'][idx + i]
+        return (img_obs, proprio_obs, action, reward, discount, next_img_obs, next_proprio_obs)
 
     def __iter__(self):
         while True:

@@ -8,7 +8,7 @@ import numpy as np
 
 
 class VideoRecorder:
-    def __init__(self, root_dir, render_size=256, fps=20):
+    def __init__(self, root_dir, render_size=256, fps=30):
         if root_dir is not None:
             self.save_dir = root_dir / 'eval_video'
             self.save_dir.mkdir(exist_ok=True)
@@ -26,12 +26,8 @@ class VideoRecorder:
 
     def record(self, env):
         if self.enabled:
-            if hasattr(env, 'physics'):
-                frame = env.physics.render(height=self.render_size,
-                                           width=self.render_size,
-                                           camera_id=0)
-            else:
-                frame = env.render()
+            frame = env.render(offscreen=True, camera_name="configured_view", resolution=(84, 84))
+            frame = np.transpose(frame, (1, 2, 0)) # e.g. (3, 84, 84) -> (84, 84, 3) bc the latter is needed to save gif
             self.frames.append(frame)
 
     def save(self, file_name):
@@ -41,7 +37,7 @@ class VideoRecorder:
 
 
 class TrainVideoRecorder:
-    def __init__(self, root_dir, render_size=256, fps=20):
+    def __init__(self, root_dir, render_size=256, fps=30):
         if root_dir is not None:
             self.save_dir = root_dir / 'train_video'
             self.save_dir.mkdir(exist_ok=True)
@@ -53,18 +49,19 @@ class TrainVideoRecorder:
         self.frames = []
 
     def init(self, obs, enabled=True):
-        self.frames = []
-        self.enabled = self.save_dir is not None and enabled
-        self.record(obs)
+        if self.save_dir is not None:
+            self.frames = []
+            self.enabled = self.save_dir is not None and enabled
+            self.record(obs)
 
     def record(self, obs):
-        if self.enabled:
+        if self.save_dir is not None:
             frame = cv2.resize(obs[-3:].transpose(1, 2, 0),
-                               dsize=(self.render_size, self.render_size),
-                               interpolation=cv2.INTER_CUBIC)
+                                dsize=(self.render_size, self.render_size),
+                                interpolation=cv2.INTER_CUBIC)
             self.frames.append(frame)
 
     def save(self, file_name):
-        if self.enabled:
+        if self.save_dir is not None:
             path = self.save_dir / file_name
             imageio.mimsave(str(path), self.frames, fps=self.fps)

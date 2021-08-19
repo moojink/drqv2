@@ -1,27 +1,31 @@
 # env
-# env: button-press-v2-goal-hidden
+env: button-press-v2-goal-hidden
 # env: drawer-open-v2-goal-hidden
-env: peg-insert-side-v2-goal-hidden
+# env: peg-insert-side-v2-goal-hidden
 # env: handle-press-side-v2-goal-hidden
 # env: peg-unplug-side-v2-goal-hidden
 
 view: 1
-run_dir: ./logs/delete/
-random_init_obj_pos: true
+run_dir: ./logs/drq-v2/
+random_init_obj_pos: false
 seed: 1
 
+# metaworld stuff
+proprio_obs_shape: 39
 # task settings
+image_size: 84
 frame_stack: 3
 action_repeat: 2
 discount: 0.99
 # train settings
 num_train_frames: 1000000
 num_seed_frames: 4000
+save_train_video_every_frames: 10000
 # eval
 eval_every_frames: 10000
-num_eval_episodes: 10
+num_eval_episodes: 20
 # snapshot
-save_snapshot: false
+save_snapshot: true
 # replay buffer
 replay_buffer_size: 1000000
 replay_buffer_num_workers: 4
@@ -31,13 +35,14 @@ batch_size: 256
 device: cuda
 save_video: true
 save_train_video: false
-use_tb: false
+use_tb: true
 # experiment
 experiment: exp
 
 agent:
-  _target_: drqv2.DrQV2Agent
-  obs_shape: ??? # to be specified later
+  _target_: meta_drqv2.DrQV2Agent
+  img_obs_shape: ??? # to be specified later
+  proprio_obs_shape: 117 # 39 * frame_stack(3) = 117
   action_shape: ??? # to be specified later
   device: ${device}
   lr: 1e-4
