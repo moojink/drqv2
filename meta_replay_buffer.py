@@ -36,7 +36,8 @@ def load_episode(fn):
 
 
 class ReplayBufferStorage:
-    def __init__(self, data_specs, replay_dir):
+    def __init__(self, view, data_specs, replay_dir):
+        self.view = view
         self._data_specs = data_specs
         self._replay_dir = replay_dir
         if not os.path.exists(replay_dir):
@@ -47,8 +48,14 @@ class ReplayBufferStorage:
     def __len__(self):
         return self._num_transitions
 
-    def add(self, img_obs, proprio_obs, action, reward, discount, done):
-        self._current_episode['img_obs'].append(img_obs)
+    def add(self, obs, action, reward, discount, done):
+        if self.view == 'both':
+            img_obs1, img_obs3, proprio_obs = obs
+            self._current_episode['img_obs1'].append(img_obs1)
+            self._current_episode['img_obs3'].append(img_obs3)
+        else:
+            img_obs, proprio_obs = obs
+            self._current_episode['img_obs'].append(img_obs)
         self._current_episode['proprio_obs'].append(proprio_obs)
         self._current_episode['action'].append(action)
         self._current_episode['reward'].append(np.full((1,), reward, np.float32)) # need shape (1,) to prevent broadcasting issue
@@ -56,6 +63,12 @@ class ReplayBufferStorage:
         if done:
             episode = dict()
             for spec in self._data_specs:
+                if spec.name == 'img_obs' and self.view == 'both': # special case
+                    value1 = self._current_episode['img_obs1']
+                    value3 = self._current_episode['img_obs3']
+                    episode['img_obs1'] = np.array(value1, spec.dtype)
+                    episode['img_obs3'] = np.array(value3, spec.dtype)
+                    continue
                 value = self._current_episode[spec.name]
                 episode[spec.name] = np.array(value, spec.dtype)
             self._current_episode = defaultdict(list)
@@ -80,8 +93,9 @@ class ReplayBufferStorage:
 
 
 class ReplayBuffer(IterableDataset):
-    def __init__(self, replay_dir, max_size, num_workers, nstep, discount,
+    def __init__(self, view, replay_dir, max_size, num_workers, nstep, discount,
                  fetch_every, save_snapshot):
+        self.view = view
         self._replay_dir = replay_dir
         self._size = 0
         self._max_size = max_size
@@ -149,10 +163,8 @@ class ReplayBuffer(IterableDataset):
         episode = self._sample_episode()
         # add +1 for the first dummy transition
         idx = np.random.randint(0, episode_len(episode) - self._nstep + 1) + 1
-        img_obs = episode['img_obs'][idx - 1]
         proprio_obs = episode['proprio_obs'][idx - 1]
         action = episode['action'][idx]
-        next_img_obs = episode['img_obs'][idx + self._nstep - 1]
         next_proprio_obs = episode['proprio_obs'][idx + self._nstep - 1]
         reward = np.zeros_like(episode['reward'][idx])
         discount = np.ones_like(episode['discount'][idx])
@@ -160,7 +172,16 @@ class ReplayBuffer(IterableDataset):
             step_reward = episode['reward'][idx + i]
             reward += discount * step_reward
             discount *= episode['discount'][idx + i]
-        return (img_obs, proprio_obs, action, reward, discount, next_img_obs, next_proprio_obs)
+        if self.view == 'both':
+            img_obs1 = episode['img_obs1'][idx - 1]
+            img_obs3 = episode['img_obs3'][idx - 1]
+            next_img_obs1 = episode['img_obs1'][idx + self._nstep - 1]
+            next_img_obs3 = episode['img_obs3'][idx + self._nstep - 1]
+            return (img_obs1, img_obs3, proprio_obs, action, reward, discount, next_img_obs1, next_img_obs3, next_proprio_obs)
+        else:
+            img_obs = episode['img_obs'][idx - 1]
+            next_img_obs = episode['img_obs'][idx + self._nstep - 1]
+            return (img_obs, proprio_obs, action, reward, discount, next_img_obs, next_proprio_obs)
 
     def __iter__(self):
         while True:
@@ -173,11 +194,12 @@ def _worker_init_fn(worker_id):
     random.seed(seed)
 
 
-def make_replay_loader(replay_dir, max_size, batch_size, num_workers,
+def make_replay_loader(view, replay_dir, max_size, batch_size, num_workers,
                        save_snapshot, nstep, discount):
     max_size_per_worker = max_size // max(1, num_workers)
 
-    iterable = ReplayBuffer(replay_dir,
+    iterable = ReplayBuffer(view,
+                            replay_dir,
                             max_size_per_worker,
                             num_workers,
                             nstep,

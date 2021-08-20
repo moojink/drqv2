@@ -130,9 +130,10 @@ class Critic(nn.Module):
 
 
 class DrQV2Agent:
-    def __init__(self, img_obs_shape, proprio_obs_shape, action_shape, device, lr, feature_dim,
+    def __init__(self, view, img_obs_shape, proprio_obs_shape, action_shape, device, lr, feature_dim,
                  hidden_dim, critic_target_tau, num_expl_steps,
                  update_every_steps, stddev_schedule, stddev_clip, use_tb):
+        self.view = view
         self.device = device
         self.critic_target_tau = critic_target_tau
         self.update_every_steps = update_every_steps
@@ -142,18 +143,28 @@ class DrQV2Agent:
         self.stddev_clip = stddev_clip
 
         # models
-        self.encoder = Encoder(img_obs_shape).to(device)
-        self.actor = Actor(self.encoder.repr_dim, proprio_obs_shape, action_shape, feature_dim,
+        if self.view == 'both':
+            self.encoder1 = Encoder(img_obs_shape).to(device)
+            self.encoder3 = Encoder(img_obs_shape).to(device)
+            repr_dim = self.encoder1.repr_dim + self.encoder3.repr_dim # img representation dim
+        else:
+            self.encoder = Encoder(img_obs_shape).to(device)
+            repr_dim = self.encoder.repr_dim # img representation dim
+        self.actor = Actor(repr_dim, proprio_obs_shape, action_shape, feature_dim,
                            hidden_dim).to(device)
 
-        self.critic = Critic(self.encoder.repr_dim, proprio_obs_shape, action_shape, feature_dim,
+        self.critic = Critic(repr_dim, proprio_obs_shape, action_shape, feature_dim,
                              hidden_dim).to(device)
-        self.critic_target = Critic(self.encoder.repr_dim, proprio_obs_shape, action_shape,
+        self.critic_target = Critic(repr_dim, proprio_obs_shape, action_shape,
                                     feature_dim, hidden_dim).to(device)
         self.critic_target.load_state_dict(self.critic.state_dict())
 
         # optimizers
-        self.encoder_opt = torch.optim.Adam(self.encoder.parameters(), lr=lr)
+        if self.view == 'both':
+            self.encoder_opt1 = torch.optim.Adam(self.encoder1.parameters(), lr=lr)
+            self.encoder_opt3 = torch.optim.Adam(self.encoder3.parameters(), lr=lr)
+        else:
+            self.encoder_opt = torch.optim.Adam(self.encoder.parameters(), lr=lr)
         self.actor_opt = torch.optim.Adam(self.actor.parameters(), lr=lr)
         self.critic_opt = torch.optim.Adam(self.critic.parameters(), lr=lr)
 
@@ -165,17 +176,31 @@ class DrQV2Agent:
 
     def train(self, training=True):
         self.training = training
-        self.encoder.train(training)
+        if self.view == 'both':
+            self.encoder1.train(training)
+            self.encoder3.train(training)
+        else:
+            self.encoder.train(training)
         self.actor.train(training)
         self.critic.train(training)
 
     def act(self, obs, step, eval_mode):
-        img_obs, proprio_obs = obs
-        img_obs = torch.as_tensor(img_obs, device=self.device)
-        encoder_out = self.encoder(img_obs.unsqueeze(0))
-        proprio_obs = torch.as_tensor(proprio_obs, dtype=torch.float32, device=self.device)
-        proprio_obs = proprio_obs.unsqueeze(0)
-        obs_out = torch.cat((encoder_out, proprio_obs), dim=-1)
+        if self.view == 'both':
+            img_obs1, img_obs3, proprio_obs = obs
+            img_obs1 = torch.as_tensor(img_obs1, device=self.device)
+            img_obs3 = torch.as_tensor(img_obs3, device=self.device)
+            encoder_out1 = self.encoder1(img_obs1.unsqueeze(0))
+            encoder_out3 = self.encoder3(img_obs3.unsqueeze(0))
+            proprio_obs = torch.as_tensor(proprio_obs, dtype=torch.float32, device=self.device)
+            proprio_obs = proprio_obs.unsqueeze(0)
+            obs_out = torch.cat((encoder_out1, encoder_out3, proprio_obs), dim=-1)
+        else:
+            img_obs, proprio_obs = obs
+            img_obs = torch.as_tensor(img_obs, device=self.device)
+            encoder_out = self.encoder(img_obs.unsqueeze(0))
+            proprio_obs = torch.as_tensor(proprio_obs, dtype=torch.float32, device=self.device)
+            proprio_obs = proprio_obs.unsqueeze(0)
+            obs_out = torch.cat((encoder_out, proprio_obs), dim=-1)
         stddev = utils.schedule(self.stddev_schedule, step)
         dist = self.actor(obs_out, stddev)
         if eval_mode:
@@ -207,11 +232,19 @@ class DrQV2Agent:
             metrics['critic_loss'] = critic_loss.item()
 
         # optimize encoder and critic
-        self.encoder_opt.zero_grad(set_to_none=True)
+        if self.view == 'both':
+            self.encoder_opt1.zero_grad(set_to_none=True)
+            self.encoder_opt3.zero_grad(set_to_none=True)
+        else:
+            self.encoder_opt.zero_grad(set_to_none=True)
         self.critic_opt.zero_grad(set_to_none=True)
         critic_loss.backward()
         self.critic_opt.step()
-        self.encoder_opt.step()
+        if self.view == 'both':
+            self.encoder_opt1.step()
+            self.encoder_opt3.step()
+        else:
+            self.encoder_opt.step()
 
         return metrics
 
@@ -246,19 +279,33 @@ class DrQV2Agent:
             return metrics
 
         batch = next(replay_iter)
-        img_obs, proprio_obs, action, reward, discount, next_img_obs, next_proprio_obs = utils.to_torch(
-            batch, self.device)
 
-        # augment
-        img_obs_aug = self.aug(img_obs.float())
-        next_img_obs_aug = self.aug(next_img_obs.float())
-        # encode
-        encoder_out = self.encoder(img_obs_aug)
-        with torch.no_grad():
-            next_encoder_out = self.encoder(next_img_obs_aug)
-
-        obs_repr = torch.cat((encoder_out, proprio_obs), dim=-1) # obs_repr = observation representation
-        next_obs_repr = torch.cat((next_encoder_out, next_proprio_obs), dim=-1)
+        if self.view == 'both':
+            img_obs1, img_obs3, proprio_obs, action, reward, discount, next_img_obs1, next_img_obs3, next_proprio_obs = utils.to_torch(batch, self.device)
+            # augment
+            img_obs_aug1 = self.aug(img_obs1.float())
+            img_obs_aug3 = self.aug(img_obs3.float())
+            next_img_obs_aug1 = self.aug(next_img_obs1.float())
+            next_img_obs_aug3 = self.aug(next_img_obs3.float())
+            # encode
+            encoder_out1 = self.encoder1(img_obs_aug1)
+            encoder_out3 = self.encoder3(img_obs_aug3)
+            with torch.no_grad():
+                next_encoder_out1 = self.encoder1(next_img_obs_aug1)
+                next_encoder_out3 = self.encoder3(next_img_obs_aug3)
+            obs_repr = torch.cat((encoder_out1, encoder_out3, proprio_obs), dim=-1) # obs_repr = observation representation
+            next_obs_repr = torch.cat((next_encoder_out1, next_encoder_out3, next_proprio_obs), dim=-1)
+        else:
+            img_obs, proprio_obs, action, reward, discount, next_img_obs, next_proprio_obs = utils.to_torch(batch, self.device)
+            # augment
+            img_obs_aug = self.aug(img_obs.float())
+            next_img_obs_aug = self.aug(next_img_obs.float())
+            # encode
+            encoder_out = self.encoder(img_obs_aug)
+            with torch.no_grad():
+                next_encoder_out = self.encoder(next_img_obs_aug)
+            obs_repr = torch.cat((encoder_out, proprio_obs), dim=-1) # obs_repr = observation representation
+            next_obs_repr = torch.cat((next_encoder_out, next_proprio_obs), dim=-1)
 
         if self.use_tb:
             metrics['batch_reward'] = reward.mean().item()
