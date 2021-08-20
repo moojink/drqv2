@@ -1,13 +1,13 @@
 # env
-env: button-press-v2-goal-hidden
+# env: button-press-v2-goal-hidden
 # env: drawer-open-v2-goal-hidden
-# env: peg-insert-side-v2-goal-hidden
+env: peg-insert-side-v2-goal-hidden
 # env: handle-press-side-v2-goal-hidden
 # env: peg-unplug-side-v2-goal-hidden
 
 view: 1
 run_dir: ./logs/drq-v2/
-random_init_obj_pos: false
+random_init_obj_pos: true
 seed: 1
 
 # metaworld stuff
