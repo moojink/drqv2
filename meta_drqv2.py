@@ -47,7 +47,7 @@ class RandomShiftsAug(nn.Module):
 
 class Encoder(nn.Module):
     """Convolutional encoder for image-based observations."""
-    def __init__(self, img_obs_shape):
+    def __init__(self, img_obs_shape, feature_dim):
         super().__init__()
 
         assert len(img_obs_shape) == 3
@@ -66,23 +66,24 @@ class Encoder(nn.Module):
                                      nn.ReLU(), nn.Conv2d(self.num_filters, self.num_filters, 3, stride=1),
                                      nn.ReLU())
 
+        self.trunk = nn.Sequential(nn.Linear(self.repr_dim, feature_dim),
+                                   nn.LayerNorm(feature_dim), nn.Tanh())
+
         self.apply(utils.weight_init)
 
     def forward(self, obs):
         obs = obs / 255.0 - 0.5
         h = self.convnet(obs)
         h = h.view(h.shape[0], -1)
-        return h
+        out = self.trunk(h)
+        return out
 
 
 class Actor(nn.Module):
-    def __init__(self, repr_dim, proprio_obs_shape, action_shape, feature_dim, hidden_dim):
+    def __init__(self, obs_repr_dim, proprio_obs_shape, action_shape, feature_dim, hidden_dim):
         super().__init__()
 
-        self.trunk = nn.Sequential(nn.Linear(repr_dim + proprio_obs_shape, feature_dim),
-                                   nn.LayerNorm(feature_dim), nn.Tanh())
-
-        self.policy = nn.Sequential(nn.Linear(feature_dim, hidden_dim),
+        self.policy = nn.Sequential(nn.Linear(obs_repr_dim, hidden_dim),
                                     nn.ReLU(inplace=True),
                                     nn.Linear(hidden_dim, hidden_dim),
                                     nn.ReLU(inplace=True),
@@ -91,9 +92,7 @@ class Actor(nn.Module):
         self.apply(utils.weight_init)
 
     def forward(self, obs_repr, std):
-        h = self.trunk(obs_repr)
-
-        mu = self.policy(h)
+        mu = self.policy(obs_repr)
         mu = torch.tanh(mu)
         std = torch.ones_like(mu) * std
 
@@ -102,27 +101,23 @@ class Actor(nn.Module):
 
 
 class Critic(nn.Module):
-    def __init__(self, repr_dim, proprio_obs_shape, action_shape, feature_dim, hidden_dim):
+    def __init__(self, obs_repr_dim, proprio_obs_shape, action_shape, feature_dim, hidden_dim):
         super().__init__()
 
-        self.trunk = nn.Sequential(nn.Linear(repr_dim + proprio_obs_shape, feature_dim),
-                                   nn.LayerNorm(feature_dim), nn.Tanh())
-
         self.Q1 = nn.Sequential(
-            nn.Linear(feature_dim + action_shape[0], hidden_dim),
+            nn.Linear(obs_repr_dim + action_shape[0], hidden_dim),
             nn.ReLU(inplace=True), nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(inplace=True), nn.Linear(hidden_dim, 1))
 
         self.Q2 = nn.Sequential(
-            nn.Linear(feature_dim + action_shape[0], hidden_dim),
+            nn.Linear(obs_repr_dim + action_shape[0], hidden_dim),
             nn.ReLU(inplace=True), nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(inplace=True), nn.Linear(hidden_dim, 1))
 
         self.apply(utils.weight_init)
 
     def forward(self, obs_repr, action):
-        h = self.trunk(obs_repr)
-        h_action = torch.cat([h, action], dim=-1)
+        h_action = torch.cat([obs_repr, action], dim=-1)
         q1 = self.Q1(h_action)
         q2 = self.Q2(h_action)
 
@@ -144,18 +139,18 @@ class DrQV2Agent:
 
         # models
         if self.view == 'both':
-            self.encoder1 = Encoder(img_obs_shape).to(device)
-            self.encoder3 = Encoder(img_obs_shape).to(device)
-            repr_dim = self.encoder1.repr_dim + self.encoder3.repr_dim # img representation dim
+            self.encoder1 = Encoder(img_obs_shape, feature_dim).to(device)
+            self.encoder3 = Encoder(img_obs_shape, feature_dim).to(device)
+            obs_repr_dim = feature_dim * 2 + proprio_obs_shape # observation representation dim
         else:
             self.encoder = Encoder(img_obs_shape).to(device)
-            repr_dim = self.encoder.repr_dim # img representation dim
-        self.actor = Actor(repr_dim, proprio_obs_shape, action_shape, feature_dim,
+            obs_repr_dim = feature_dim + proprio_obs_shape # observation representation dim
+        self.actor = Actor(obs_repr_dim, proprio_obs_shape, action_shape, feature_dim,
                            hidden_dim).to(device)
 
-        self.critic = Critic(repr_dim, proprio_obs_shape, action_shape, feature_dim,
+        self.critic = Critic(obs_repr_dim, proprio_obs_shape, action_shape, feature_dim,
                              hidden_dim).to(device)
-        self.critic_target = Critic(repr_dim, proprio_obs_shape, action_shape,
+        self.critic_target = Critic(obs_repr_dim, proprio_obs_shape, action_shape,
                                     feature_dim, hidden_dim).to(device)
         self.critic_target.load_state_dict(self.critic.state_dict())
 
