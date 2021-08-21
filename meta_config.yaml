@@ -10,6 +10,11 @@ run_dir: ./logs/delete/
 random_init_obj_pos: true
 seed: 1
 
+# If resuming training from snapshot (aka checkpoint), you must also change num_train_frames and num_seed_frames
+# farther below. In particular, you should change num_seed_frames to be <snapshot_frame_number> + 4000.
+resume_training_from_snapshot: false
+snapshot_path: /iris/u/moojink/metaworld/logs/drq-v2-peg-insert-both-views-L2-weight1e2-seed1/0/snapshot_990000.pt
+
 # metaworld stuff
 proprio_obs_shape: 39
 # task settings
