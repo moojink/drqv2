@@ -127,7 +127,7 @@ class Critic(nn.Module):
 class DrQV2Agent:
     def __init__(self, view, img_obs_shape, proprio_obs_shape, action_shape, device, lr, feature_dim,
                  hidden_dim, critic_target_tau, num_expl_steps,
-                 update_every_steps, stddev_schedule, stddev_clip, use_tb):
+                 update_every_steps, stddev_schedule, stddev_clip, use_tb, add_img_repr_loss, img_repr_loss_weight):
         self.view = view
         self.device = device
         self.critic_target_tau = critic_target_tau
@@ -136,6 +136,9 @@ class DrQV2Agent:
         self.num_expl_steps = num_expl_steps
         self.stddev_schedule = stddev_schedule
         self.stddev_clip = stddev_clip
+        self.feature_dim = feature_dim
+        self.add_img_repr_loss = add_img_repr_loss
+        self.img_repr_loss_weight = int(float(img_repr_loss_weight)) # weight on L2 loss b/t view 1 and view 3 representations
 
         # models
         if self.view == 'both':
@@ -218,12 +221,33 @@ class DrQV2Agent:
             target_Q = reward + (discount * target_V)
 
         Q1, Q2 = self.critic(obs_repr, action)
-        critic_loss = F.mse_loss(Q1, target_Q) + F.mse_loss(Q2, target_Q)
+        if self.view == 'both' and self.add_img_repr_loss: # L2 loss b/t view 1 and view 3 representations
+            Q1_target_Q_loss, Q2_target_Q_loss = F.mse_loss(Q1, target_Q), F.mse_loss(Q2, target_Q)
+            img_repr1, img_repr3 = obs_repr[:, :self.feature_dim], obs_repr[:, self.feature_dim:self.feature_dim*2]
+            img_repr1, img_repr3 = F.normalize(img_repr1, dim=1), F.normalize(img_repr3, dim=1)
+            next_img_repr1, next_img_repr3 = next_obs_repr[:, :self.feature_dim], next_obs_repr[:, self.feature_dim:self.feature_dim*2]
+            next_img_repr1, next_img_repr3 = F.normalize(next_img_repr1, dim=1), F.normalize(next_img_repr3, dim=1)
+            # Stop gradients on view 1 representations. This will cause the gradient to only flow through view 3,
+            # pushing view 3 closer to view 1 while leaving view 1 unaffected.
+            img_repr1, next_img_repr1 = img_repr1.detach(), next_img_repr1.detach()
+            img_repr_loss = F.mse_loss(img_repr1, img_repr3)
+            next_img_repr_loss = F.mse_loss(next_img_repr1, next_img_repr3)
+            batch_size = obs_repr.detach().shape[0]
+            total_img_repr_loss = 1 / batch_size * self.img_repr_loss_weight * (img_repr_loss + next_img_repr_loss)
+            critic_loss = Q1_target_Q_loss + Q2_target_Q_loss + total_img_repr_loss
+        else:
+            critic_loss = F.mse_loss(Q1, target_Q) + F.mse_loss(Q2, target_Q)
 
         if self.use_tb:
             metrics['critic_target_q'] = target_Q.mean().item()
             metrics['critic_q1'] = Q1.mean().item()
             metrics['critic_q2'] = Q2.mean().item()
+            if self.view == 'both':
+                metrics['critic_q1_target_q_loss'] = Q1_target_Q_loss.item()
+                metrics['critic_q2_target_q_loss'] = Q2_target_Q_loss.item()
+                metrics['critic_img_repr_loss'] = img_repr_loss.item()
+                metrics['critic_next_img_repr_loss'] = next_img_repr_loss.item()
+                metrics['critic_total_img_repr_loss'] = total_img_repr_loss.item()
             metrics['critic_loss'] = critic_loss.item()
 
         # optimize encoder and critic

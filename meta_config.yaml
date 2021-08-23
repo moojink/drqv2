@@ -10,6 +10,9 @@ run_dir: ./logs/delete/
 random_init_obj_pos: true
 seed: 1
 
+add_img_repr_loss: true # whether to have L2 loss b/t view 1 and view 3 representations
+img_repr_loss_weight: 1e4 # weight on L2 loss b/t view 1 and view 3 representations
+
 # If resuming training from snapshot (aka checkpoint), you must also change num_train_frames and num_seed_frames
 # farther below. In particular, you should change num_seed_frames to be <snapshot_frame_number> + 4000.
 resume_training_from_snapshot: false
@@ -60,6 +63,8 @@ agent:
   feature_dim: 50
   stddev_schedule: 'linear(1.0,0.1,500000)'
   stddev_clip: 0.3
+  add_img_repr_loss: ${add_img_repr_loss}
+  img_repr_loss_weight: ${img_repr_loss_weight}
 
 hydra:
   run:
