@@ -146,7 +146,7 @@ class DrQV2Agent:
             self.encoder3 = Encoder(img_obs_shape, feature_dim).to(device)
             obs_repr_dim = feature_dim * 2 + proprio_obs_shape # observation representation dim
         else:
-            self.encoder = Encoder(img_obs_shape).to(device)
+            self.encoder = Encoder(img_obs_shape, feature_dim).to(device)
             obs_repr_dim = feature_dim + proprio_obs_shape # observation representation dim
         self.actor = Actor(obs_repr_dim, proprio_obs_shape, action_shape, feature_dim,
                            hidden_dim).to(device)
