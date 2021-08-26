@@ -242,7 +242,7 @@ class DrQV2Agent:
             metrics['critic_target_q'] = target_Q.mean().item()
             metrics['critic_q1'] = Q1.mean().item()
             metrics['critic_q2'] = Q2.mean().item()
-            if self.view == 'both':
+            if self.view == 'both' and self.add_img_repr_loss:
                 metrics['critic_q1_target_q_loss'] = Q1_target_Q_loss.item()
                 metrics['critic_q2_target_q_loss'] = Q2_target_Q_loss.item()
                 metrics['critic_img_repr_loss'] = img_repr_loss.item()
