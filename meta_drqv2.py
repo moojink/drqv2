@@ -257,7 +257,8 @@ class DrQV2Agent:
             p_var = torch.square(torch.exp(p_log_std))
             q_mean, q_var = torch.zeros_like(p_mean, dtype=p_mean.dtype), torch.ones_like(p_var, dtype=p_var.dtype)
             kl = 0.5 * ((q_var / p_var).log() + (p_var + (p_mean - q_mean).pow(2)).div(q_var) - 1)
-            critic_loss += self.vib_kl_weight * torch.sum(kl)
+            kl_loss = self.vib_kl_weight * torch.sum(kl)
+            critic_loss += kl_loss
 
         if self.use_tb:
             metrics['critic_target_q'] = target_Q.mean().item()
@@ -269,6 +270,8 @@ class DrQV2Agent:
                 metrics['critic_img_repr_loss'] = img_repr_loss.item()
                 metrics['critic_next_img_repr_loss'] = next_img_repr_loss.item()
                 metrics['critic_total_img_repr_loss'] = total_img_repr_loss.item()
+            if self.view == 'both' and self.use_vib:
+                metrics['kl_loss'] = kl_loss.item()
             metrics['critic_loss'] = critic_loss.item()
 
         # optimize encoder and critic
