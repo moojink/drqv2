@@ -257,7 +257,8 @@ class DrQV2Agent:
             p_var = torch.square(torch.exp(p_log_std))
             q_mean, q_var = torch.zeros_like(p_mean, dtype=p_mean.dtype), torch.ones_like(p_var, dtype=p_var.dtype)
             kl = 0.5 * ((q_var / p_var).log() + (p_var + (p_mean - q_mean).pow(2)).div(q_var) - 1)
-            kl_loss = self.vib_kl_weight * torch.sum(kl)
+            batch_size = kl.detach().shape[0]
+            kl_loss = self.vib_kl_weight * 1 / batch_size * torch.sum(kl)
             critic_loss += kl_loss
 
         if self.use_tb:
