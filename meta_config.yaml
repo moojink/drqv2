@@ -2,9 +2,10 @@
 # env: button-press-v2-goal-hidden
 # env: drawer-open-v2-goal-hidden
 # env: peg-insert-side-v2-goal-hidden
-env: peg-insert-side-hard-v2-goal-hidden
+# env: peg-insert-side-hard-v2-goal-hidden
 # env: handle-press-side-v2-goal-hidden
 # env: peg-unplug-side-v2-goal-hidden
+env: assembly-v2-goal-hidden
 
 view: both
 run_dir: ./logs/delete/
