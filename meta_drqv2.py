@@ -79,6 +79,22 @@ class Encoder(nn.Module):
         return out
 
 
+class SwitchNet(nn.Module):
+    """A smallfeedforward network that outpus a sigmoid
+    value used to switch the view 3 representation on/off."""
+    def __init__(self, feature_dim, hidden_dim):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(feature_dim, hidden_dim),
+                                   nn.LayerNorm(hidden_dim),
+                                   nn.ReLU(),
+                                   nn.Linear(hidden_dim, 1),
+                                   nn.Sigmoid())
+        self.apply(utils.weight_init)
+
+    def forward(self, x):
+        return self.net(x)
+
+
 class Actor(nn.Module):
     def __init__(self, obs_repr_dim, proprio_obs_shape, action_shape, feature_dim, hidden_dim):
         super().__init__()
@@ -152,6 +168,7 @@ class DrQV2Agent:
             else:
                 self.encoder3 = Encoder(img_obs_shape, feature_dim).to(device)
             obs_repr_dim = feature_dim * 2 + proprio_obs_shape # observation representation dim
+            self.switch_net = SwitchNet(feature_dim, hidden_dim=25).to(device) # for switching view 3 on/off
         else:
             self.encoder = Encoder(img_obs_shape, feature_dim).to(device)
             obs_repr_dim = feature_dim + proprio_obs_shape # observation representation dim
@@ -195,7 +212,14 @@ class DrQV2Agent:
             img_obs1 = torch.as_tensor(img_obs1, device=self.device)
             img_obs3 = torch.as_tensor(img_obs3, device=self.device)
             encoder_out1 = self.encoder1(img_obs1.unsqueeze(0))
-            encoder_out3 = self.encoder3(img_obs3.unsqueeze(0))
+            switch_val = self.switch_net(encoder_out1)
+            if switch_val < 0.5:
+                # Zero out the view 3 representation and detach to stop gradient flow
+                # through the view 3 encoder.
+                with torch.no_grad():
+                    encoder_out3 = torch.zeros(encoder_out1.shape, dtype=torch.float32, device=encoder_out1.device)
+            else:
+                encoder_out3 = self.encoder3(img_obs3.unsqueeze(0))
             if self.use_vib: # variational information bottleneck
                 means, log_stds = torch.split(encoder_out3, self.feature_dim, dim=1)
                 eps = torch.reshape(torch.as_tensor(np.random.randn(*means.shape), dtype=torch.float32, device=self.device), means.shape) # sample from mean 0 std 1 gaussian
@@ -334,9 +358,15 @@ class DrQV2Agent:
             # encode
             encoder_out1 = self.encoder1(img_obs_aug1)
             encoder_out3 = self.encoder3(img_obs_aug3)
+            switch_mask = self.switch_net(encoder_out1)
+            # Zero out some view 3 representations in the batch.
+            encoder_out3 = encoder_out3 * switch_mask
             with torch.no_grad():
                 next_encoder_out1 = self.encoder1(next_img_obs_aug1)
                 next_encoder_out3 = self.encoder3(next_img_obs_aug3)
+                next_switch_mask = self.switch_net(next_encoder_out1)
+                # Zero out some view 3 representations in the batch.
+                next_encoder_out3 = next_encoder_out3 * next_switch_mask
             if self.use_vib: # variational information bottleneck
                 orig_encoder_out3 = torch.clone(encoder_out3) # want original (non-reparameterized) encoder output for KL divergence term in objective
                 means, log_stds = torch.split(encoder_out3, self.feature_dim, dim=1)

@@ -2,13 +2,13 @@
 # env: button-press-v2-goal-hidden
 # env: drawer-open-v2-goal-hidden
 # env: peg-insert-side-v2-goal-hidden
-# env: peg-insert-side-hard-v2-goal-hidden
+env: peg-insert-side-hard-v2-goal-hidden
 # env: handle-press-side-v2-goal-hidden
 # env: peg-unplug-side-v2-goal-hidden
-env: assembly-v2-goal-hidden
+# env: assembly-v2-goal-hidden
 
 view: both
-run_dir: ./logs/delete/
+run_dir: ./logs/drq-v2-peg-insert-hard-learned_switching-seed1/
 random_init_obj_pos: true
 seed: 1
 
@@ -47,7 +47,7 @@ batch_size: 256
 # misc
 device: cuda
 save_video: true
-save_train_video: false
+save_train_video: true
 use_tb: true
 # experiment
 experiment: exp
