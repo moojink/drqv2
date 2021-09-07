@@ -2,13 +2,13 @@
 # env: button-press-v2-goal-hidden
 # env: drawer-open-v2-goal-hidden
 # env: peg-insert-side-v2-goal-hidden
-# env: peg-insert-side-hard-v2-goal-hidden
+env: peg-insert-side-hard-v2-goal-hidden
 # env: handle-press-side-v2-goal-hidden
 # env: peg-unplug-side-v2-goal-hidden
-env: assembly-v2-goal-hidden
+# env: assembly-v2-goal-hidden
 
 view: both
-run_dir: ./logs/delete/
+run_dir: ./logs/drq-v2-peg-insert-hard-both-views-switching-two-stage-NO_GRAD_ALL-seed1/
 random_init_obj_pos: true
 seed: 1
 
@@ -16,7 +16,7 @@ add_img_repr_loss: false # whether to have L2 loss b/t view 1 and view 3 represe
 img_repr_loss_weight: 1e6 # weight on L2 loss b/t view 1 and view 3 representations
 
 use_vib: false # whether to use variational information bottleneck to regularize the view 3 representation
-vib_kl_weight: 1e0
+vib_kl_weight: 1e1
 
 # If resuming training from snapshot (aka checkpoint), you must also change num_train_frames and num_seed_frames
 # farther below. In particular, you should change num_seed_frames to be <snapshot_frame_number> + 4000.
@@ -47,7 +47,7 @@ batch_size: 256
 # misc
 device: cuda
 save_video: true
-save_train_video: false
+save_train_video: true
 use_tb: true
 # experiment
 experiment: exp

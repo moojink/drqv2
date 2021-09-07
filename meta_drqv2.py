@@ -50,6 +50,7 @@ class Encoder(nn.Module):
     def __init__(self, img_obs_shape, feature_dim):
         super().__init__()
 
+        self.feature_dim = feature_dim
         assert len(img_obs_shape) == 3
         self.num_filters = 32
         if img_obs_shape[1] == 84: # DeepMind control suite images are 84x84
@@ -72,11 +73,21 @@ class Encoder(nn.Module):
         self.apply(utils.weight_init)
 
     def forward(self, obs):
-        obs = obs / 255.0 - 0.5
-        h = self.convnet(obs)
-        h = h.view(h.shape[0], -1)
-        out = self.trunk(h)
-        return out
+        # Switching: If ALL of the frames in the stack are zeroed out, set the output to 0 and kill the gradient s.t.
+        # no gradient passes through the encoder.
+        frame1, frame2, frame3 = obs[:,:3,:,:], obs[:,3:6,:,:], obs[:,6:,:,:]
+        assert frame1.shape == frame2.shape and frame2.shape == frame3.shape
+        frame1_sum, frame2_sum, frame3_sum = frame1.sum(), frame2.sum(), frame3.sum()
+        if frame1_sum == 0 and frame2_sum == 0 and frame3_sum == 0:
+            with torch.no_grad():
+                out = torch.zeros((obs.shape[0], self.feature_dim), dtype=torch.float32, device=obs.device)
+                return out
+        else:
+            obs = obs / 255.0 - 0.5
+            h = self.convnet(obs)
+            h = h.view(h.shape[0], -1)
+            out = self.trunk(h)
+            return out
 
 
 class Actor(nn.Module):
