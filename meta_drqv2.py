@@ -213,9 +213,9 @@ class DrQV2Agent:
             img_obs3 = torch.as_tensor(img_obs3, device=self.device)
             encoder_out1 = self.encoder1(img_obs1.unsqueeze(0))
             encoder_out3 = self.encoder3(img_obs3.unsqueeze(0))
-            switch_mask = self.switch_net(encoder_out1.detach()) # detach so that switching doesn't cause gradient flow thru view 1 encoder
+            switching_mask = self.switch_net(encoder_out1.detach()) # detach so that switching doesn't cause gradient flow thru view 1 encoder
             # Weight the view 3 representations in the batch.
-            encoder_out3 = encoder_out3 * switch_mask
+            encoder_out3 = encoder_out3 * switching_mask
             if self.use_vib: # variational information bottleneck
                 means, log_stds = torch.split(encoder_out3, self.feature_dim, dim=1)
                 eps = torch.reshape(torch.as_tensor(np.random.randn(*means.shape), dtype=torch.float32, device=self.device), means.shape) # sample from mean 0 std 1 gaussian
@@ -354,15 +354,15 @@ class DrQV2Agent:
             # encode
             encoder_out1 = self.encoder1(img_obs_aug1)
             encoder_out3 = self.encoder3(img_obs_aug3)
-            switch_mask = self.switch_net(encoder_out1.detach()) # detach so that switching doesn't cause gradient flow thru view 1 encoder
+            switching_mask = self.switch_net(encoder_out1.detach()) # detach so that switching doesn't cause gradient flow thru view 1 encoder
             # Weight the view 3 representations in the batch.
-            encoder_out3 = encoder_out3 * switch_mask
+            encoder_out3 = encoder_out3 * switching_mask
             with torch.no_grad():
                 next_encoder_out1 = self.encoder1(next_img_obs_aug1)
                 next_encoder_out3 = self.encoder3(next_img_obs_aug3)
-                next_switch_mask = self.switch_net(next_encoder_out1)
+                next_switching_mask = self.switch_net(next_encoder_out1)
                 # Weight the view 3 representations in the batch.
-                next_encoder_out3 = next_encoder_out3 * next_switch_mask
+                next_encoder_out3 = next_encoder_out3 * next_switching_mask
             if self.use_vib: # variational information bottleneck
                 orig_encoder_out3 = torch.clone(encoder_out3) # want original (non-reparameterized) encoder output for KL divergence term in objective
                 means, log_stds = torch.split(encoder_out3, self.feature_dim, dim=1)
