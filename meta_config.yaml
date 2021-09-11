@@ -15,8 +15,9 @@ seed: 1
 add_img_repr_loss: false # whether to have L2 loss b/t view 1 and view 3 representations
 img_repr_loss_weight: 1e6 # weight on L2 loss b/t view 1 and view 3 representations
 
-use_vib: false # whether to use variational information bottleneck to regularize the view 3 representation
-vib_kl_weight: 1e0
+use_vib: true # whether to use variational information bottleneck to regularize the view 3 representation
+vib_kl1_weight: 1e1
+vib_kl3_weight: 1e1
 
 # If resuming training from snapshot (aka checkpoint), you must also change num_train_frames and num_seed_frames
 # farther below. In particular, you should change num_seed_frames to be <snapshot_frame_number> + 4000.
@@ -71,7 +72,8 @@ agent:
   add_img_repr_loss: ${add_img_repr_loss}
   img_repr_loss_weight: ${img_repr_loss_weight}
   use_vib: ${use_vib}
-  vib_kl_weight: ${vib_kl_weight}
+  vib_kl1_weight: ${vib_kl1_weight}
+  vib_kl3_weight: ${vib_kl3_weight}
 
 hydra:
   run:

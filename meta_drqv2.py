@@ -127,7 +127,7 @@ class Critic(nn.Module):
 class DrQV2Agent:
     def __init__(self, view, img_obs_shape, proprio_obs_shape, action_shape, device, lr, feature_dim,
                  hidden_dim, critic_target_tau, num_expl_steps,
-                 update_every_steps, stddev_schedule, stddev_clip, use_tb, add_img_repr_loss, img_repr_loss_weight, use_vib, vib_kl_weight):
+                 update_every_steps, stddev_schedule, stddev_clip, use_tb, add_img_repr_loss, img_repr_loss_weight, use_vib, vib_kl1_weight, vib_kl3_weight):
         self.view = view
         self.device = device
         self.critic_target_tau = critic_target_tau
@@ -140,16 +140,18 @@ class DrQV2Agent:
         self.add_img_repr_loss = add_img_repr_loss
         self.img_repr_loss_weight = int(float(img_repr_loss_weight)) # weight on L2 loss b/t view 1 and view 3 representations
         self.use_vib = use_vib # variational information bottleneck on view 3 representation
-        self.vib_kl_weight = float(vib_kl_weight)
+        self.vib_kl1_weight = float(vib_kl1_weight)
+        self.vib_kl3_weight = float(vib_kl3_weight)
 
         # models
         if self.view == 'both':
-            self.encoder1 = Encoder(img_obs_shape, feature_dim).to(device)
             if self.use_vib:
                 # If using variational information bottleneck, we have feature_dim dimensions for the
                 # means of the encoder output and feature_dim dimensions for the (log) standard deviations.
+                self.encoder1 = Encoder(img_obs_shape, feature_dim * 2).to(device)
                 self.encoder3 = Encoder(img_obs_shape, feature_dim * 2).to(device)
             else:
+                self.encoder1 = Encoder(img_obs_shape, feature_dim).to(device)
                 self.encoder3 = Encoder(img_obs_shape, feature_dim).to(device)
             obs_repr_dim = feature_dim * 2 + proprio_obs_shape # observation representation dim
         else:
@@ -197,9 +199,14 @@ class DrQV2Agent:
             encoder_out1 = self.encoder1(img_obs1.unsqueeze(0))
             encoder_out3 = self.encoder3(img_obs3.unsqueeze(0))
             if self.use_vib: # variational information bottleneck
-                means, log_stds = torch.split(encoder_out3, self.feature_dim, dim=1)
-                eps = torch.reshape(torch.as_tensor(np.random.randn(*means.shape), dtype=torch.float32, device=self.device), means.shape) # sample from mean 0 std 1 gaussian
-                encoder_out3 = means + eps * torch.exp(log_stds) # reparameterization trick
+                # View 1
+                means1, log_stds1 = torch.split(encoder_out1, self.feature_dim, dim=1)
+                eps1 = torch.reshape(torch.as_tensor(np.random.randn(*means1.shape), dtype=torch.float32, device=self.device), means1.shape) # sample from mean 0 std 1 gaussian
+                encoder_out1 = means1 + eps1 * torch.exp(log_stds1) # reparameterization trick
+                # View 3
+                means3, log_stds3 = torch.split(encoder_out3, self.feature_dim, dim=1)
+                eps3 = torch.reshape(torch.as_tensor(np.random.randn(*means3.shape), dtype=torch.float32, device=self.device), means3.shape) # sample from mean 0 std 1 gaussian
+                encoder_out3 = means3 + eps3 * torch.exp(log_stds3) # reparameterization trick
             proprio_obs = torch.as_tensor(proprio_obs, dtype=torch.float32, device=self.device)
             proprio_obs = proprio_obs.unsqueeze(0)
             obs_out = torch.cat((encoder_out1, encoder_out3, proprio_obs), dim=-1)
@@ -220,7 +227,7 @@ class DrQV2Agent:
                 action.uniform_(-1.0, 1.0)
         return action.cpu().numpy()[0]
 
-    def update_critic(self, obs_repr, action, reward, discount, next_obs_repr, step, orig_encoder_out3=None):
+    def update_critic(self, obs_repr, action, reward, discount, next_obs_repr, step, orig_encoder_out1=None, orig_encoder_out3=None):
         metrics = dict()
 
         with torch.no_grad():
@@ -250,16 +257,27 @@ class DrQV2Agent:
             critic_loss = F.mse_loss(Q1, target_Q) + F.mse_loss(Q2, target_Q)
 
         if self.use_vib: # variational information bottleneck
-            # Add a KL divergence term to the objective to regularize the view 3 representation.
+            # Add a KL divergence term to the objective to regularize the view 1 and view 3 representations.
             #   p: p(z|x), encoder output distribution
             #   q: q(z), variational approximation of p(z), fixed as a standard normal distribution
-            p_mean, p_log_std = torch.split(orig_encoder_out3, self.feature_dim, dim=1)
-            p_var = torch.square(torch.exp(p_log_std))
-            q_mean, q_var = torch.zeros_like(p_mean, dtype=p_mean.dtype), torch.ones_like(p_var, dtype=p_var.dtype)
-            kl = 0.5 * ((q_var / p_var).log() + (p_var + (p_mean - q_mean).pow(2)).div(q_var) - 1)
-            batch_size = kl.detach().shape[0]
-            kl_loss = self.vib_kl_weight * 1 / batch_size * torch.sum(kl)
-            critic_loss += kl_loss
+
+            # View 1
+            p_mean1, p_log_std1 = torch.split(orig_encoder_out1, self.feature_dim, dim=1)
+            p_var1 = torch.square(torch.exp(p_log_std1))
+            q_mean1, q_var1 = torch.zeros_like(p_mean1, dtype=p_mean1.dtype), torch.ones_like(p_var1, dtype=p_var1.dtype)
+            kl1 = 0.5 * ((q_var1 / p_var1).log() + (p_var1 + (p_mean1 - q_mean1).pow(2)).div(q_var1) - 1)
+            batch_size = kl1.detach().shape[0]
+            kl1_loss = self.vib_kl1_weight * 1 / batch_size * torch.sum(kl1)
+            critic_loss += kl1_loss
+
+            # View 3
+            p_mean3, p_log_std3 = torch.split(orig_encoder_out3, self.feature_dim, dim=1)
+            p_var3 = torch.square(torch.exp(p_log_std3))
+            q_mean3, q_var3 = torch.zeros_like(p_mean3, dtype=p_mean3.dtype), torch.ones_like(p_var3, dtype=p_var3.dtype)
+            kl3 = 0.5 * ((q_var3 / p_var3).log() + (p_var3 + (p_mean3 - q_mean3).pow(2)).div(q_var3) - 1)
+            batch_size = kl3.detach().shape[0]
+            kl3_loss = self.vib_kl3_weight * 1 / batch_size * torch.sum(kl3)
+            critic_loss += kl3_loss
 
         if self.use_tb:
             metrics['critic_target_q'] = target_Q.mean().item()
@@ -272,7 +290,8 @@ class DrQV2Agent:
                 metrics['critic_next_img_repr_loss'] = next_img_repr_loss.item()
                 metrics['critic_total_img_repr_loss'] = total_img_repr_loss.item()
             if self.view == 'both' and self.use_vib:
-                metrics['kl_loss'] = kl_loss.item()
+                metrics['kl1_loss'] = kl1_loss.item()
+                metrics['kl3_loss'] = kl3_loss.item()
             metrics['critic_loss'] = critic_loss.item()
 
         # optimize encoder and critic
@@ -338,13 +357,21 @@ class DrQV2Agent:
                 next_encoder_out1 = self.encoder1(next_img_obs_aug1)
                 next_encoder_out3 = self.encoder3(next_img_obs_aug3)
             if self.use_vib: # variational information bottleneck
+                orig_encoder_out1 = torch.clone(encoder_out1) # want original (non-reparameterized) encoder output for KL divergence term in objective
+                means1, log_stds1 = torch.split(encoder_out1, self.feature_dim, dim=1)
+                eps1 = torch.reshape(torch.as_tensor(np.random.randn(*means1.shape), dtype=torch.float32, device=self.device), means1.shape) # sample from mean 0 std 1 gaussian
+                encoder_out1 = means1 + eps1 * torch.exp(log_stds1) # reparameterization trick
+                means1, log_stds1 = torch.split(next_encoder_out1, self.feature_dim, dim=1)
+                eps1 = torch.reshape(torch.as_tensor(np.random.randn(*means1.shape), dtype=torch.float32, device=self.device), means1.shape) # sample from mean 0 std 1 gaussian
+                next_encoder_out1 = means1 + eps1 * torch.exp(log_stds1) # reparameterization trick
+
                 orig_encoder_out3 = torch.clone(encoder_out3) # want original (non-reparameterized) encoder output for KL divergence term in objective
-                means, log_stds = torch.split(encoder_out3, self.feature_dim, dim=1)
-                eps = torch.reshape(torch.as_tensor(np.random.randn(*means.shape), dtype=torch.float32, device=self.device), means.shape) # sample from mean 0 std 1 gaussian
-                encoder_out3 = means + eps * torch.exp(log_stds) # reparameterization trick
-                means, log_stds = torch.split(next_encoder_out3, self.feature_dim, dim=1)
-                eps = torch.reshape(torch.as_tensor(np.random.randn(*means.shape), dtype=torch.float32, device=self.device), means.shape) # sample from mean 0 std 1 gaussian
-                next_encoder_out3 = means + eps * torch.exp(log_stds) # reparameterization trick
+                means3, log_stds3 = torch.split(encoder_out3, self.feature_dim, dim=1)
+                eps3 = torch.reshape(torch.as_tensor(np.random.randn(*means3.shape), dtype=torch.float32, device=self.device), means3.shape) # sample from mean 0 std 1 gaussian
+                encoder_out3 = means3 + eps3 * torch.exp(log_stds3) # reparameterization trick
+                means3, log_stds3 = torch.split(next_encoder_out3, self.feature_dim, dim=1)
+                eps3 = torch.reshape(torch.as_tensor(np.random.randn(*means3.shape), dtype=torch.float32, device=self.device), means3.shape) # sample from mean 0 std 1 gaussian
+                next_encoder_out3 = means3 + eps3 * torch.exp(log_stds3) # reparameterization trick
             obs_repr = torch.cat((encoder_out1, encoder_out3, proprio_obs), dim=-1) # obs_repr = observation representation
             next_obs_repr = torch.cat((next_encoder_out1, next_encoder_out3, next_proprio_obs), dim=-1)
         else:
@@ -364,7 +391,7 @@ class DrQV2Agent:
 
         # update critic
         if self.use_vib:
-            metrics.update(self.update_critic(obs_repr, action, reward, discount, next_obs_repr, step, orig_encoder_out3))
+            metrics.update(self.update_critic(obs_repr, action, reward, discount, next_obs_repr, step, orig_encoder_out1, orig_encoder_out3))
         else:
             metrics.update(self.update_critic(obs_repr, action, reward, discount, next_obs_repr, step))
 
