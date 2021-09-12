@@ -79,6 +79,19 @@ class Encoder(nn.Module):
         return out
 
 
+class VIB(nn.Module):
+    def __init__(self, feature_dim, hidden_dim):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(feature_dim * 2, hidden_dim),
+                                   nn.LayerNorm(hidden_dim),
+                                   nn.ReLU(),
+                                   nn.Linear(hidden_dim, feature_dim * 2))
+        self.apply(utils.weight_init)
+
+    def forward(self, x):
+        return self.net(x)
+
+
 class Actor(nn.Module):
     def __init__(self, obs_repr_dim, proprio_obs_shape, action_shape, feature_dim, hidden_dim):
         super().__init__()
@@ -145,12 +158,9 @@ class DrQV2Agent:
         # models
         if self.view == 'both':
             self.encoder1 = Encoder(img_obs_shape, feature_dim).to(device)
+            self.encoder3 = Encoder(img_obs_shape, feature_dim).to(device)
             if self.use_vib:
-                # If using variational information bottleneck, we have feature_dim dimensions for the
-                # means of the encoder output and feature_dim dimensions for the (log) standard deviations.
-                self.encoder3 = Encoder(img_obs_shape, feature_dim * 2).to(device)
-            else:
-                self.encoder3 = Encoder(img_obs_shape, feature_dim).to(device)
+                self.vib = VIB(feature_dim=feature_dim, hidden_dim=feature_dim*2).to(device)
             obs_repr_dim = feature_dim * 2 + proprio_obs_shape # observation representation dim
         else:
             self.encoder = Encoder(img_obs_shape, feature_dim).to(device)
@@ -197,12 +207,14 @@ class DrQV2Agent:
             encoder_out1 = self.encoder1(img_obs1.unsqueeze(0))
             encoder_out3 = self.encoder3(img_obs3.unsqueeze(0))
             if self.use_vib: # variational information bottleneck
-                means, log_stds = torch.split(encoder_out3, self.feature_dim, dim=1)
+                encoder_out_1_and_3 = torch.cat((encoder_out1.detach(), encoder_out3), dim=-1)
+                vib_out = self.vib(encoder_out_1_and_3)
+                means, log_stds = torch.split(vib_out, self.feature_dim, dim=1)
                 eps = torch.reshape(torch.as_tensor(np.random.randn(*means.shape), dtype=torch.float32, device=self.device), means.shape) # sample from mean 0 std 1 gaussian
-                encoder_out3 = means + eps * torch.exp(log_stds) # reparameterization trick
+                vib_repr = means + eps * torch.exp(log_stds) # reparameterization trick
             proprio_obs = torch.as_tensor(proprio_obs, dtype=torch.float32, device=self.device)
             proprio_obs = proprio_obs.unsqueeze(0)
-            obs_out = torch.cat((encoder_out1, encoder_out3, proprio_obs), dim=-1)
+            obs_out = torch.cat((encoder_out1, vib_repr, proprio_obs), dim=-1)
         else:
             img_obs, proprio_obs = obs
             img_obs = torch.as_tensor(img_obs, device=self.device)
@@ -220,7 +232,7 @@ class DrQV2Agent:
                 action.uniform_(-1.0, 1.0)
         return action.cpu().numpy()[0]
 
-    def update_critic(self, obs_repr, action, reward, discount, next_obs_repr, step, orig_encoder_out3=None):
+    def update_critic(self, obs_repr, action, reward, discount, next_obs_repr, step, orig_vib_out=None):
         metrics = dict()
 
         with torch.no_grad():
@@ -253,7 +265,7 @@ class DrQV2Agent:
             # Add a KL divergence term to the objective to regularize the view 3 representation.
             #   p: p(z|x), encoder output distribution
             #   q: q(z), variational approximation of p(z), fixed as a standard normal distribution
-            p_mean, p_log_std = torch.split(orig_encoder_out3, self.feature_dim, dim=1)
+            p_mean, p_log_std = torch.split(orig_vib_out, self.feature_dim, dim=1)
             p_var = torch.square(torch.exp(p_log_std))
             q_mean, q_var = torch.zeros_like(p_mean, dtype=p_mean.dtype), torch.ones_like(p_var, dtype=p_var.dtype)
             kl = 0.5 * ((q_var / p_var).log() + (p_var + (p_mean - q_mean).pow(2)).div(q_var) - 1)
@@ -338,15 +350,22 @@ class DrQV2Agent:
                 next_encoder_out1 = self.encoder1(next_img_obs_aug1)
                 next_encoder_out3 = self.encoder3(next_img_obs_aug3)
             if self.use_vib: # variational information bottleneck
-                orig_encoder_out3 = torch.clone(encoder_out3) # want original (non-reparameterized) encoder output for KL divergence term in objective
-                means, log_stds = torch.split(encoder_out3, self.feature_dim, dim=1)
+                detached_encoder_out1 = encoder_out1.detach()
+                encoder_out_1_and_3 = torch.cat((detached_encoder_out1, encoder_out3), dim=-1)
+                vib_out = self.vib(encoder_out_1_and_3)
+                orig_vib_out = torch.clone(vib_out)
+                means, log_stds = torch.split(vib_out, self.feature_dim, dim=1)
                 eps = torch.reshape(torch.as_tensor(np.random.randn(*means.shape), dtype=torch.float32, device=self.device), means.shape) # sample from mean 0 std 1 gaussian
-                encoder_out3 = means + eps * torch.exp(log_stds) # reparameterization trick
-                means, log_stds = torch.split(next_encoder_out3, self.feature_dim, dim=1)
+                vib_repr = means + eps * torch.exp(log_stds) # reparameterization trick
+
+                detached_next_encoder_out1 = next_encoder_out1.detach() # not really necessary b/c already applied torch.no_grad() to this, but leaving it for consistency
+                next_encoder_out_1_and_3 = torch.cat((detached_next_encoder_out1, next_encoder_out3), dim=-1)
+                next_vib_out = self.vib(next_encoder_out_1_and_3)
+                means, log_stds = torch.split(next_vib_out, self.feature_dim, dim=1)
                 eps = torch.reshape(torch.as_tensor(np.random.randn(*means.shape), dtype=torch.float32, device=self.device), means.shape) # sample from mean 0 std 1 gaussian
-                next_encoder_out3 = means + eps * torch.exp(log_stds) # reparameterization trick
-            obs_repr = torch.cat((encoder_out1, encoder_out3, proprio_obs), dim=-1) # obs_repr = observation representation
-            next_obs_repr = torch.cat((next_encoder_out1, next_encoder_out3, next_proprio_obs), dim=-1)
+                next_vib_repr = means + eps * torch.exp(log_stds) # reparameterization trick
+            obs_repr = torch.cat((encoder_out1, vib_repr, proprio_obs), dim=-1) # obs_repr = observation representation
+            next_obs_repr = torch.cat((next_encoder_out1, next_vib_repr, next_proprio_obs), dim=-1)
         else:
             img_obs, proprio_obs, action, reward, discount, next_img_obs, next_proprio_obs = utils.to_torch(batch, self.device)
             # augment
@@ -364,7 +383,7 @@ class DrQV2Agent:
 
         # update critic
         if self.use_vib:
-            metrics.update(self.update_critic(obs_repr, action, reward, discount, next_obs_repr, step, orig_encoder_out3))
+            metrics.update(self.update_critic(obs_repr, action, reward, discount, next_obs_repr, step, orig_vib_out))
         else:
             metrics.update(self.update_critic(obs_repr, action, reward, discount, next_obs_repr, step))
 
