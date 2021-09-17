@@ -206,15 +206,17 @@ class DrQV2Agent:
             img_obs3 = torch.as_tensor(img_obs3, device=self.device)
             encoder_out1 = self.encoder1(img_obs1.unsqueeze(0))
             encoder_out3 = self.encoder3(img_obs3.unsqueeze(0))
+            proprio_obs = torch.as_tensor(proprio_obs, dtype=torch.float32, device=self.device)
+            proprio_obs = proprio_obs.unsqueeze(0)
             if self.use_vib: # variational information bottleneck
                 encoder_out_1_and_3 = torch.cat((encoder_out1.detach(), encoder_out3), dim=-1)
                 vib_out = self.vib(encoder_out_1_and_3)
                 means, log_stds = torch.split(vib_out, self.feature_dim, dim=1)
                 eps = torch.reshape(torch.as_tensor(np.random.randn(*means.shape), dtype=torch.float32, device=self.device), means.shape) # sample from mean 0 std 1 gaussian
                 vib_repr = means + eps * torch.exp(log_stds) # reparameterization trick
-            proprio_obs = torch.as_tensor(proprio_obs, dtype=torch.float32, device=self.device)
-            proprio_obs = proprio_obs.unsqueeze(0)
-            obs_out = torch.cat((encoder_out1, vib_repr, proprio_obs), dim=-1)
+                obs_out = torch.cat((encoder_out1, vib_repr, proprio_obs), dim=-1)
+            else:
+                obs_out = torch.cat((encoder_out1, encoder_out3, proprio_obs), dim=-1)
         else:
             img_obs, proprio_obs = obs
             img_obs = torch.as_tensor(img_obs, device=self.device)
