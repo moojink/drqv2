@@ -154,8 +154,8 @@ class ActionRepeatWrapper(gym.Wrapper):
         self._action_repeat = action_repeat
         self._discount = discount
 
-    def reset(self):
-        return self._env.reset()
+    def reset(self, seed=None):
+        return self._env.reset(seed=seed)
 
     def step(self, action):
         total_reward = 0.0
@@ -192,8 +192,8 @@ class FrameStackWrapper(gym.Wrapper):
             dtype=env.observation_space['im_rgb'].dtype)
         self._max_episode_steps = env.max_path_length
 
-    def reset(self):
-        obs = self._env.reset()
+    def reset(self, seed=None):
+        obs = self._env.reset(seed=seed)
         for _ in range(self._k):
             if str(self.view) == 'both':
                 self._frames1.append(obs['im_rgb1'])
