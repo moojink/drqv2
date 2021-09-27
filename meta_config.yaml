@@ -7,7 +7,7 @@
 # env: peg-unplug-side-v2-goal-hidden
 env: assembly-v2-goal-hidden
 
-view: both
+view: double_view_3
 run_dir: ./logs/delete/
 random_init_obj_pos: true
 seed: 1

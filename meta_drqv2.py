@@ -143,7 +143,7 @@ class DrQV2Agent:
         self.vib_kl_weight = float(vib_kl_weight)
 
         # models
-        if self.view == 'both':
+        if self.view == 'both' or self.view == 'double_view_3':
             self.encoder1 = Encoder(img_obs_shape, feature_dim).to(device)
             if self.use_vib:
                 # If using variational information bottleneck, we have feature_dim dimensions for the
@@ -165,7 +165,7 @@ class DrQV2Agent:
         self.critic_target.load_state_dict(self.critic.state_dict())
 
         # optimizers
-        if self.view == 'both':
+        if self.view == 'both' or self.view == 'double_view_3':
             self.encoder_opt1 = torch.optim.Adam(self.encoder1.parameters(), lr=lr)
             self.encoder_opt3 = torch.optim.Adam(self.encoder3.parameters(), lr=lr)
         else:
@@ -181,7 +181,7 @@ class DrQV2Agent:
 
     def train(self, training=True):
         self.training = training
-        if self.view == 'both':
+        if self.view == 'both' or self.view == 'double_view_3':
             self.encoder1.train(training)
             self.encoder3.train(training)
         else:
@@ -190,7 +190,7 @@ class DrQV2Agent:
         self.critic.train(training)
 
     def act(self, obs, step, eval_mode):
-        if self.view == 'both':
+        if self.view == 'both' or self.view == 'double_view_3':
             img_obs1, img_obs3, proprio_obs = obs
             img_obs1 = torch.as_tensor(img_obs1, device=self.device)
             img_obs3 = torch.as_tensor(img_obs3, device=self.device)
@@ -232,7 +232,7 @@ class DrQV2Agent:
             target_Q = reward + (discount * target_V)
 
         Q1, Q2 = self.critic(obs_repr, action)
-        if self.view == 'both' and self.add_img_repr_loss: # L2 loss b/t view 1 and view 3 representations
+        if (self.view == 'both' or self.view == 'double_view_3') and self.add_img_repr_loss: # L2 loss b/t view 1 and view 3 representations
             Q1_target_Q_loss, Q2_target_Q_loss = F.mse_loss(Q1, target_Q), F.mse_loss(Q2, target_Q)
             img_repr1, img_repr3 = obs_repr[:, :self.feature_dim], obs_repr[:, self.feature_dim:self.feature_dim*2]
             img_repr1, img_repr3 = F.normalize(img_repr1, dim=1), F.normalize(img_repr3, dim=1)
@@ -265,18 +265,18 @@ class DrQV2Agent:
             metrics['critic_target_q'] = target_Q.mean().item()
             metrics['critic_q1'] = Q1.mean().item()
             metrics['critic_q2'] = Q2.mean().item()
-            if self.view == 'both' and self.add_img_repr_loss:
+            if (self.view == 'both' or self.view == 'double_view_3') and self.add_img_repr_loss:
                 metrics['critic_q1_target_q_loss'] = Q1_target_Q_loss.item()
                 metrics['critic_q2_target_q_loss'] = Q2_target_Q_loss.item()
                 metrics['critic_img_repr_loss'] = img_repr_loss.item()
                 metrics['critic_next_img_repr_loss'] = next_img_repr_loss.item()
                 metrics['critic_total_img_repr_loss'] = total_img_repr_loss.item()
-            if self.view == 'both' and self.use_vib:
+            if (self.view == 'both' or self.view == 'double_view_3') and self.use_vib:
                 metrics['kl_loss'] = kl_loss.item()
             metrics['critic_loss'] = critic_loss.item()
 
         # optimize encoder and critic
-        if self.view == 'both':
+        if self.view == 'both' or self.view == 'double_view_3':
             self.encoder_opt1.zero_grad(set_to_none=True)
             self.encoder_opt3.zero_grad(set_to_none=True)
         else:
@@ -284,7 +284,7 @@ class DrQV2Agent:
         self.critic_opt.zero_grad(set_to_none=True)
         critic_loss.backward()
         self.critic_opt.step()
-        if self.view == 'both':
+        if self.view == 'both' or self.view == 'double_view_3':
             self.encoder_opt1.step()
             self.encoder_opt3.step()
         else:
@@ -324,7 +324,7 @@ class DrQV2Agent:
 
         batch = next(replay_iter)
 
-        if self.view == 'both':
+        if self.view == 'both' or self.view == 'double_view_3':
             img_obs1, img_obs3, proprio_obs, action, reward, discount, next_img_obs1, next_img_obs3, next_proprio_obs = utils.to_torch(batch, self.device)
             # augment
             img_obs_aug1 = self.aug(img_obs1.float())

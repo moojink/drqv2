@@ -24,14 +24,14 @@ class VideoRecorder:
 
         self.render_size = render_size
         self.fps = fps
-        if self.view == 'both':
+        if self.view == 'both' or self.view == 'double_view_3':
             self.frames1 = []
             self.frames3 = []
         else:
             self.frames = []
 
     def init(self, env, enabled=True):
-        if self.view == 'both':
+        if self.view == 'both' or self.view == 'double_view_3':
             self.frames1 = []
             self.frames3 = []
         else:
@@ -48,6 +48,13 @@ class VideoRecorder:
                 frame3 = env.render_overwrite(offscreen=True, overwrite_view="view_3", resolution=(self.render_size, self.render_size))
                 frame3 = np.transpose(frame3, (1, 2, 0)) # e.g. (3, 84, 84) -> (84, 84, 3) bc the latter is needed to save gif
                 self.frames3.append(frame3)
+            elif self.view == 'double_view_3':
+                frame1 = env.render_overwrite(offscreen=True, overwrite_view="view_3_alt", resolution=(self.render_size, self.render_size))
+                frame1 = np.transpose(frame1, (1, 2, 0)) # e.g. (3, 84, 84) -> (84, 84, 3) bc the latter is needed to save gif
+                self.frames1.append(frame1)
+                frame3 = env.render_overwrite(offscreen=True, overwrite_view="view_3", resolution=(self.render_size, self.render_size))
+                frame3 = np.transpose(frame3, (1, 2, 0)) # e.g. (3, 84, 84) -> (84, 84, 3) bc the latter is needed to save gif
+                self.frames3.append(frame3)
             else:
                 frame = env.render(offscreen=True, camera_name="configured_view", resolution=(self.render_size, self.render_size))
                 frame = np.transpose(frame, (1, 2, 0)) # e.g. (3, 84, 84) -> (84, 84, 3) bc the latter is needed to save gif
@@ -55,7 +62,7 @@ class VideoRecorder:
 
     def save(self, file_name):
         if self.enabled:
-            if self.view == 'both':
+            if self.view == 'both' or self.view == 'double_view_3':
                 path = str(self.save_dir / file_name) + '-view_1.gif'
                 imageio.mimsave(path, self.frames1, fps=self.fps)
                 path = str(self.save_dir / file_name) + '-view_3.gif'
@@ -76,7 +83,7 @@ class TrainVideoRecorder:
 
         self.render_size = render_size
         self.fps = fps
-        if self.view == 'both':
+        if self.view == 'both' or self.view == 'double_view_3':
             self.frames1 = []
             self.frames3 = []
         else:
@@ -84,7 +91,7 @@ class TrainVideoRecorder:
 
     def init(self, obs, enabled=True):
         self.enabled = self.save_dir is not None and enabled
-        if self.view == 'both':
+        if self.view == 'both' or self.view == 'double_view_3':
             self.frames1 = []
             self.frames3 = []
         else:
@@ -93,7 +100,7 @@ class TrainVideoRecorder:
 
     def record(self, obs):
         if self.enabled:
-            if self.view == 'both':
+            if self.view == 'both' or self.view == 'double_view_3':
                 img_obs1, img_obs3, _ = obs
                 frame1 = cv2.resize(img_obs1[-3:].transpose(1, 2, 0),
                                     dsize=(self.render_size, self.render_size),
@@ -112,7 +119,7 @@ class TrainVideoRecorder:
 
     def save(self, file_name):
         if self.enabled:
-            if self.view == 'both':
+            if self.view == 'both' or self.view == 'double_view_3':
                 path = str(self.save_dir / file_name) + '-view_1.gif'
                 imageio.mimsave(path, self.frames1, fps=self.fps)
                 path = str(self.save_dir / file_name) + '-view_3.gif'

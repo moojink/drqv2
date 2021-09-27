@@ -178,7 +178,7 @@ class FrameStackWrapper(gym.Wrapper):
         self._env = env
         gym.Wrapper.__init__(self, env)
         self._k = k
-        if str(self.view) == 'both':
+        if str(self.view) == 'both' or self.view == 'double_view_3':
             self._frames1 = deque([], maxlen=k)
             self._frames3 = deque([], maxlen=k)
         else:
@@ -195,7 +195,7 @@ class FrameStackWrapper(gym.Wrapper):
     def reset(self, seed=None):
         obs = self._env.reset(seed=seed)
         for _ in range(self._k):
-            if str(self.view) == 'both':
+            if str(self.view) == 'both' or self.view == 'double_view_3':
                 self._frames1.append(obs['im_rgb1'])
                 self._frames3.append(obs['im_rgb3'])
             else:
@@ -205,7 +205,7 @@ class FrameStackWrapper(gym.Wrapper):
 
     def step(self, action):
         obs, reward, done, info = self._env.step(action)
-        if str(self.view) == 'both':
+        if str(self.view) == 'both' or self.view == 'double_view_3':
             self._frames1.append(obs['im_rgb1'])
             self._frames3.append(obs['im_rgb3'])
         else:
@@ -216,7 +216,7 @@ class FrameStackWrapper(gym.Wrapper):
     def _get_obs(self):
         assert len(self._proprio_obs_stack) == self._k
         proprio_obs = np.concatenate(list(self._proprio_obs_stack), axis=0)
-        if str(self.view) == 'both':
+        if str(self.view) == 'both' or self.view == 'double_view_3':
             assert len(self._frames1) == self._k
             assert len(self._frames3) == self._k
             img_obs1 = np.concatenate(list(self._frames1), axis=0)

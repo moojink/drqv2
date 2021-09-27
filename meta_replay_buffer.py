@@ -49,7 +49,7 @@ class ReplayBufferStorage:
         return self._num_transitions
 
     def add(self, obs, action, reward, discount, done):
-        if self.view == 'both':
+        if self.view == 'both' or self.view == 'double_view_3':
             img_obs1, img_obs3, proprio_obs = obs
             self._current_episode['img_obs1'].append(img_obs1)
             self._current_episode['img_obs3'].append(img_obs3)
@@ -63,7 +63,7 @@ class ReplayBufferStorage:
         if done:
             episode = dict()
             for spec in self._data_specs:
-                if spec.name == 'img_obs' and self.view == 'both': # special case
+                if spec.name == 'img_obs' and (self.view == 'both' or self.view == 'double_view_3'): # special case
                     value1 = self._current_episode['img_obs1']
                     value3 = self._current_episode['img_obs3']
                     episode['img_obs1'] = np.array(value1, spec.dtype)
@@ -172,7 +172,7 @@ class ReplayBuffer(IterableDataset):
             step_reward = episode['reward'][idx + i]
             reward += discount * step_reward
             discount *= episode['discount'][idx + i]
-        if self.view == 'both':
+        if self.view == 'both' or self.view == 'double_view_3':
             img_obs1 = episode['img_obs1'][idx - 1]
             img_obs3 = episode['img_obs3'][idx - 1]
             next_img_obs1 = episode['img_obs1'][idx + self._nstep - 1]
